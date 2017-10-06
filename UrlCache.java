@@ -12,8 +12,12 @@ import java.text.*;
 import javax.tools.FileObject;
 
 public class UrlCache {
-	public String lastModified;
+	public HashMap<String, Long> cache;
+
 	public int contentLength;
+	public Long lastModified;
+
+	public String currDir;
 
     /**
      * Default constructor to initialize data structures used for caching/etc
@@ -22,7 +26,24 @@ public class UrlCache {
      * @throws IOException if encounters any errors/exceptions
      */
 	public UrlCache() throws IOException {
-		
+		currDir = System.getProperty("user.dir");
+		String cacheLocation = currDir + "/lastModified.cache";
+		File cacheFile = new File(cacheLocation);
+		if (!cacheFile.exists()) {
+			cache = new HashMap<String, Long>();
+		} else {
+			FileInputStream fis = new FileInputStream(cacheLocation);
+			ObjectInputStream ois = new ObjectInputStream(fis);
+
+			try {
+				cache = (HashMap<String, Long>) ois.readObject();
+			} catch (Exception e) {
+				System.out.println("Error: " + e.getMessage());
+			}
+
+			ois.close();
+			fis.close();
+		}
 	}
 	
 	/**
@@ -55,17 +76,30 @@ public class UrlCache {
 
 			readHeader(socket);
 
-			byte[] body = new byte[contentLength];
-			int counter = 0;
-			while (counter < contentLength) {
-				socket.getInputStream().read(body, counter, 1);
-				counter++;
+			if (!cache.containsKey(url)) {
+				cache.put(url, lastModified);
+				downloadFile(socket, pathData);
+			} else {
+				if (lastModified.longValue() != cache.get(url).longValue()) {
+					cache.remove(url);
+					cache.put(url, lastModified);
+					downloadFile(socket, pathData);
+				} else {
+					System.out.println("Cache already contains necessary file.");
+				}
 			}
-
-			createFile(pathData, body);
 		} catch (Exception e) {
 			System.out.println("Error: " + e.getMessage());
 		}
+
+		String cacheLocation = currDir + "/lastModified.cache";
+		FileOutputStream fos = new FileOutputStream(cacheLocation);
+		ObjectOutputStream oos = new ObjectOutputStream(fos);
+
+		oos.writeObject(cache);
+
+		oos.close();
+		fos.close();
 	}
 
 	public String[] urlParse(String url) {
@@ -90,34 +124,12 @@ public class UrlCache {
 		return retArray;
 	}
 
-	public void readHeader(Socket socket) {
-		String header = "";
-		byte[] headerBytes = new byte[1024];
-		int counter = 0;
-
-		try {
-			while (!header.contains("\n\r\n")) {
-				socket.getInputStream().read(headerBytes, counter, 1);
-				header += (char) headerBytes[counter++];
-			}
-		} catch (Exception e) {
-			System.out.println("Error: " + e.getMessage());
-		}
-		String[] temp = header.split("Last-Modified: ");
-		temp = temp[1].split("\r\n", 2);
-		lastModified = temp[0];
-
-		temp = temp[1].split("Content-Length: ");
-		temp = temp[1].split("\r\n");
-		contentLength = Integer.parseInt(temp[0]);
-	}
-
 	public void createFile(String[] pathData, byte[] body) {
 		String host = pathData[0];
 		String path = pathData[1];
 		String fileName = pathData[2];
 
-		String dirPath = System.getProperty("user.dir") + "/" + host + "/" + path;
+		String dirPath = currDir + "/" + host + "/" + path;
 		File dir = new File(dirPath);
 		dir.mkdirs();
 
@@ -131,6 +143,49 @@ public class UrlCache {
 		}
 	}
 
+	public void downloadFile(Socket socket, String[] pathData) {
+		String host = pathData[0];
+		String path = pathData[1];
+		String fileName = pathData[2];
+
+		try {
+			byte[] body = new byte[contentLength];
+			int counter = 0;
+			while (counter < contentLength) {
+				socket.getInputStream().read(body, counter, 1);
+				counter++;
+			}
+
+			createFile(pathData, body);
+		} catch (Exception e) {
+			System.out.println("Error: " + e.getMessage());
+		}
+	}
+
+	public void readHeader(Socket socket) {
+		String header = "";
+		byte[] headerBytes = new byte[1024];
+		int counter = 0;
+
+		try {
+			while (!header.contains("\n\r\n")) {
+				socket.getInputStream().read(headerBytes, counter, 1);
+				header += (char) headerBytes[counter++];
+			}
+		} catch (Exception e) {
+			System.out.println("Error: " + e.getMessage());
+		}
+		//System.out.println(header);
+
+		String[] temp = header.split("Last-Modified: ");
+		temp = temp[1].split("\r\n", 2);
+		lastModified = new Long(turnLastModifiedToMillis(temp[0]));
+
+		temp = temp[1].split("Content-Length: ");
+		temp = temp[1].split("\r\n");
+		contentLength = Integer.parseInt(temp[0]);
+	}
+
     /**
      * Returns the Last-Modified time associated with the object specified by the parameter url.
 	 *
@@ -138,11 +193,13 @@ public class UrlCache {
 	 * @return the Last-Modified time in millisecond as in Date.getTime()
      */
 	public long getLastModified(String url) {
-		long millis = 0;
-		SimpleDateFormat format = new SimpleDateFormat("EEE, dd MMM yyyy hh:mm:ss zzz");
-		Date date = format.parse(lastModified, new ParsePosition(0));
-		millis = date.getTime();
-		return millis;
+		Long millis = cache.get(url);
+		return millis.longValue();
 	}
 
+	public long turnLastModifiedToMillis(String last_Modified) {
+		SimpleDateFormat format = new SimpleDateFormat("EEE, dd MMM yyyy hh:mm:ss zzz");
+		Date date = format.parse(last_Modified, new ParsePosition(0));
+		return date.getTime();
+	}
 }
