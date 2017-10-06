@@ -10,6 +10,7 @@ import java.net.*;
 import java.util.*;
 import java.text.*;
 import javax.tools.FileObject;
+import java.nio.file.Files;
 
 public class UrlCache {
 	public HashMap<String, Long> cache;
@@ -83,6 +84,9 @@ public class UrlCache {
 				if (lastModified.longValue() != cache.get(url).longValue()) {
 					cache.remove(url);
 					cache.put(url, lastModified);
+
+					File file = new File(currDir + "/" + host + "/" + path + "/" + fileName);
+					file.delete();
 					downloadFile(socket, pathData);
 				} else {
 					System.out.println("Cache already contains necessary file.");
@@ -180,7 +184,7 @@ public class UrlCache {
 		String[] temp = header.split("Last-Modified: ");
 		temp = temp[1].split("\r\n", 2);
 		lastModified = new Long(turnLastModifiedToMillis(temp[0]));
-
+		
 		temp = temp[1].split("Content-Length: ");
 		temp = temp[1].split("\r\n");
 		contentLength = Integer.parseInt(temp[0]);
