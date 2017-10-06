@@ -28,8 +28,12 @@ public class UrlCache {
      */
 	public UrlCache() throws IOException {
 		currDir = System.getProperty("user.dir");
-		String cacheLocation = currDir + "/lastModified.cache";
+		String cacheLocation = currDir + "/lastModified.cache"; //directory path on which the cache is saved
 		File cacheFile = new File(cacheLocation);
+		//if the cache doesn't exist, make a new empty one
+		//else read the cache file
+			//java doesn't like my code for this,
+			//thus prompting the note "UrlCache.java uses unchecked or unsafe operations" at compile time
 		if (!cacheFile.exists()) {
 			cache = new HashMap<String, Long>();
 		} else {
@@ -59,24 +63,31 @@ public class UrlCache {
 		String path = pathData[1];
 		String fileName = pathData[2];
 
-		/*format the GET request*/
+		//format the GET request
 		String request = "GET /" + path + fileName + " HTTP/1.1\r\n";
 		request += "Host: " + host + "\r\n";
 		request += "Connection: close\r\n";
 		request += "\r\n";
 
 		try {
-			/*open a TCP connection to the server*/
+			//open a TCP connection to the server
 			Socket socket = new Socket(host, 80);
 
 			PrintWriter outputStream = new PrintWriter(new DataOutputStream(socket.getOutputStream()));
 
-			/*send GET request to server*/
+			//send GET request to server
 			outputStream.print(request);
 			outputStream.flush();
 
+			//read the header for content length and last modified values
 			readHeader(socket);
 
+			//chceck whether the cache already has the data
+			//if the cache does not have the path at all, then obviously we do not have the file either
+				//load the url and its lastModified value into the HashMap structure
+			//else, check if any change has been made to the file at the server
+				//if so, download the new file, change the value of lastModified for the url key in the HashMap
+				//else, the file is already in the cache. just chill mang
 			if (!cache.containsKey(url)) {
 				cache.put(url, lastModified);
 				downloadFile(socket, pathData);
@@ -85,8 +96,10 @@ public class UrlCache {
 					cache.remove(url);
 					cache.put(url, lastModified);
 
+					//delete the old file (not strictly necessary? might be bloaty overhead)
 					File file = new File(currDir + "/" + host + "/" + path + "/" + fileName);
 					file.delete();
+					//process the rest of the inputStream to obtain the object being downloaded
 					downloadFile(socket, pathData);
 				} else {
 					System.out.println("Cache already contains necessary file.");
@@ -96,6 +109,7 @@ public class UrlCache {
 			System.out.println("Error: " + e.getMessage());
 		}
 
+		//write the data in the cache to the file before exiting the method
 		String cacheLocation = currDir + "/lastModified.cache";
 		FileOutputStream fos = new FileOutputStream(cacheLocation);
 		ObjectOutputStream oos = new ObjectOutputStream(fos);
@@ -106,6 +120,14 @@ public class UrlCache {
 		fos.close();
 	}
 
+	/**
+	 *	Takes any url and cuts it into 3 pieces: the host, the path, and the fileName.
+	 *	The host is the name of the server, the path is every subdirectory within it
+	 *	fileName is the name of the Object to be downloaded
+	 *
+	 *	@param url 	same URL as in getObject, it is the URL that holds the Object to be downloaded
+	 *	@return String array that contains the 3 strings host, path, and fileName
+	 */
 	public String[] urlParse(String url) {
 		String[] temp = url.split("/");
 		String[] retArray = new String[3];
@@ -128,6 +150,12 @@ public class UrlCache {
 		return retArray;
 	}
 
+	/**
+	 *	Creates a file in an appropriate directory that holds the data from the server
+	 *
+	 *	@param pathData	String array that holds the host, path, and fileName from the url. These are reflected in the names of the directory
+	 *	@param body	Byte array that holds the data from the server
+	 */
 	public void createFile(String[] pathData, byte[] body) {
 		String host = pathData[0];
 		String path = pathData[1];
@@ -147,31 +175,47 @@ public class UrlCache {
 		}
 	}
 
+	/**
+	 *	Reads everything after the header into a byte array and pushes it to method createFile
+	 *
+	 *	@param socket 	the socket that connects to the server to read inputStream
+	 *	@param pathData	String array that holds the host, path, and fileName from the url. Needed to call creatFile
+	 */
 	public void downloadFile(Socket socket, String[] pathData) {
 		String host = pathData[0];
 		String path = pathData[1];
 		String fileName = pathData[2];
 
 		try {
+			//create a byte array of exactly Content-Length (found using readHeader method)
 			byte[] body = new byte[contentLength];
 			int counter = 0;
+			//while the byte array has not been filled completely, keep filling it
+			//since we know that the size of the data should fit perfectly inside the byte array
 			while (counter < contentLength) {
 				socket.getInputStream().read(body, counter, 1);
 				counter++;
 			}
-
+			//take the data in the byte array and create a file that holds it at pathData
 			createFile(pathData, body);
 		} catch (Exception e) {
 			System.out.println("Error: " + e.getMessage());
 		}
 	}
 
+	/**
+	 *	Parses through header lines, specifically for Content-Length and Last-Modified which are necessary.
+	 *
+	 *	@param socket 	the socket that connects to the server to read inputStream
+	 */
 	public void readHeader(Socket socket) {
 		String header = "";
 		byte[] headerBytes = new byte[1024];
 		int counter = 0;
 
 		try {
+			//"\n\r\n" is only found at the end of the header
+			//so as soon as it is part of the header string, we know we are at the end of the header
 			while (!header.contains("\n\r\n")) {
 				socket.getInputStream().read(headerBytes, counter, 1);
 				header += (char) headerBytes[counter++];
@@ -179,12 +223,14 @@ public class UrlCache {
 		} catch (Exception e) {
 			System.out.println("Error: " + e.getMessage());
 		}
-		//System.out.println(header);
+		//System.out.println(header); //DEBUG
 
+		//finding Last-Modified
 		String[] temp = header.split("Last-Modified: ");
 		temp = temp[1].split("\r\n", 2);
 		lastModified = new Long(turnLastModifiedToMillis(temp[0]));
 		
+		//finding Content-Length
 		temp = temp[1].split("Content-Length: ");
 		temp = temp[1].split("\r\n");
 		contentLength = Integer.parseInt(temp[0]);
@@ -197,6 +243,7 @@ public class UrlCache {
 	 * @return the Last-Modified time in millisecond as in Date.getTime()
      */
 	public long getLastModified(String url) {
+		//just pull it from the cache
 		Long millis = cache.get(url);
 		return millis.longValue();
 	}
